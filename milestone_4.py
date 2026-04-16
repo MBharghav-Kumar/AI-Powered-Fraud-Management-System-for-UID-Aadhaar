@@ -7,6 +7,7 @@ from datetime import datetime
 import pytesseract
 import os
 import re
+from io import BytesIO
 
 # =========================
 # TESSERACT CONFIG (LOCAL ONLY)
@@ -19,7 +20,6 @@ except:
 
 IMG_SIZE = 128
 
-# Load face cascade
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
@@ -42,7 +42,7 @@ st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Detect", "History"])
 
 # =========================
-# FACE DETECTION (WITH BOX)
+# FACE DETECTION
 # =========================
 def detect_face(image):
     img = np.array(image)
@@ -58,7 +58,7 @@ def detect_face(image):
     return img, len(faces) > 0
 
 # =========================
-# QR DETECTION (IMPROVED)
+# QR DETECTION
 # =========================
 def detect_qr(image):
     img = np.array(image)
@@ -67,28 +67,10 @@ def detect_qr(image):
 
     detector = cv2.QRCodeDetector()
 
-    # First attempt
     data, bbox, _ = detector.detectAndDecode(gray)
 
     if bbox is not None:
         bbox = bbox.astype(int)
-
-        for i in range(len(bbox[0])):
-            pt1 = tuple(bbox[0][i])
-            pt2 = tuple(bbox[0][(i+1) % len(bbox[0])])
-            cv2.line(img, pt1, pt2, (0,255,0), 2)
-
-        cv2.putText(img, "QR", tuple(bbox[0][0]),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
-
-        return img, True
-
-    # Second attempt (zoom)
-    resized = cv2.resize(gray, None, fx=2, fy=2)
-    data, bbox, _ = detector.detectAndDecode(resized)
-
-    if bbox is not None:
-        bbox = bbox.astype(int) // 2
 
         for i in range(len(bbox[0])):
             pt1 = tuple(bbox[0][i])
@@ -116,7 +98,7 @@ def detect_logo(image):
     return np.sum(mask) > 500
 
 # =========================
-# OCR + FALLBACK
+# OCR CHECK
 # =========================
 def is_aadhaar(image):
     try:
@@ -144,7 +126,7 @@ def is_aadhaar(image):
             return True
 
     except:
-        st.warning("⚠️ OCR not available, using fallback detection")
+        st.warning("⚠️ OCR not available")
 
     return detect_logo(image)
 
@@ -170,11 +152,35 @@ def detect_fraud(image):
         return "GENUINE"
 
 # =========================
-# REPORT
+# CSV REPORT
 # =========================
-def generate_report(record):
-    df = pd.DataFrame([record])
+def generate_csv(df):
     return df.to_csv(index=False).encode("utf-8")
+
+# =========================
+# PDF REPORT
+# =========================
+def generate_pdf(df):
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+    from reportlab.lib import colors
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer)
+
+    data = [df.columns.tolist()] + df.values.tolist()
+
+    table = Table(data)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.grey),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+        ("GRID", (0,0), (-1,-1), 1, colors.black)
+    ]))
+
+    elements = [table]
+    doc.build(elements)
+
+    buffer.seek(0)
+    return buffer
 
 # =========================
 # DETECT PAGE
@@ -191,66 +197,43 @@ if page == "Detect":
         file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
         if file:
             image = Image.open(file)
-
     else:
         file = st.camera_input("Capture Image")
         if file:
             image = Image.open(file)
 
     if image:
-        st.image(image, caption="Original Image", use_column_width=True)
+        st.image(image, caption="Original Image")
 
         user_name = st.text_input("Enter Name (as per Aadhaar):")
 
         if not user_name:
-            st.warning("Please enter name before proceeding")
+            st.warning("Please enter name")
             st.stop()
-
-        st.write("👤 Name:", user_name)
 
         img_np = np.array(image)
 
-        # FACE
         img_face, face_flag = detect_face(img_np)
-
-        # QR
         img_qr, qr_flag = detect_qr(img_face)
 
-        st.image(img_qr, caption="Detected Features", use_column_width=True)
+        st.image(img_qr, caption="Detected Features")
 
-        # Other checks
         aadhaar_flag = is_aadhaar(image)
         logo_flag = detect_logo(image)
 
-        st.write("🔍 Aadhaar Check:", aadhaar_flag)
-        st.write("🙂 Face Detected:", face_flag)
-        st.write("🎨 Logo Detected:", logo_flag)
-        st.write("🔳 QR Detected:", qr_flag)
+        st.write("Face:", face_flag)
+        st.write("QR:", qr_flag)
+        st.write("Logo:", logo_flag)
 
-        # =========================
-        # FINAL DECISION (STRICT)
-        # =========================
         if not aadhaar_flag:
             result = "NOT AADHAAR ❌"
-            st.error(result)
-
         elif not face_flag:
-            result = "FAKE AADHAAR (NO FACE) ❌"
-            st.error("❌ No face detected — Invalid Aadhaar")
-
+            result = "FAKE AADHAAR ❌"
         else:
             result = detect_fraud(image)
 
-            if result == "FRAUD":
-                st.error("⚠️ Fraudulent Aadhaar Detected")
-            elif result == "GENUINE":
-                st.success("✅ Genuine Aadhaar")
-            else:
-                st.warning("❌ Invalid Image")
-
         st.write("Final Result:", result)
 
-        # SAVE HISTORY
         record = {
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Name": user_name,
@@ -258,14 +241,6 @@ if page == "Detect":
         }
 
         st.session_state.history.append(record)
-
-        # DOWNLOAD
-        st.download_button(
-            "Download Report",
-            data=generate_report(record),
-            file_name="aadhaar_report.csv",
-            mime="text/csv"
-        )
 
 # =========================
 # HISTORY PAGE
@@ -276,7 +251,25 @@ elif page == "History":
 
     if st.session_state.history:
         df = pd.DataFrame(st.session_state.history)
+
         st.dataframe(df)
+
+        # CSV Download
+        st.download_button(
+            "⬇️ Download CSV",
+            generate_csv(df),
+            "history.csv",
+            "text/csv"
+        )
+
+        # PDF Download
+        st.download_button(
+            "⬇️ Download PDF",
+            generate_pdf(df),
+            "history.pdf",
+            "application/pdf"
+        )
+
     else:
         st.write("No history available.")
 
