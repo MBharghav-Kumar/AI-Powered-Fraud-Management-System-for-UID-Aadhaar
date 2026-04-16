@@ -5,42 +5,50 @@ from PIL import Image
 
 IMG_SIZE = 128
 
+st.set_page_config(page_title="Fraud Detection", layout="centered")
+
 st.title("AI Powered Aadhaar Fraud Detection System")
-st.write("Upload an Aadhaar image to check if it is Genuine or Fraud.")
+st.write("Upload or capture an Aadhaar image to check if it is Genuine or Fraud.")
 
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"])
+# 🔹 OPTION SELECTOR
+option = st.radio("Choose Input Method:", ["Upload Image", "Capture Image"])
 
+# 🔹 INPUT HANDLING
+image = None
+
+if option == "Upload Image":
+    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"])
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file)
+
+elif option == "Capture Image":
+    captured_image = st.camera_input("Capture Aadhaar Image")
+    if captured_image is not None:
+        image = Image.open(captured_image)
+
+# 🔹 PREDICTION FUNCTION
 def predict_image(image):
     try:
         img = np.array(image)
 
-        # Debug
-        st.write("Image Shape:", img.shape)
-
         if img is None or img.size == 0:
             return "ERROR: Invalid Image"
 
-        # Convert grayscale if needed
         if len(img.shape) == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
 
-        img = cv2.resize(img, (128,128))
+        img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
         img = img / 255.0
 
-        gray = cv2.cvtColor((img*255).astype("uint8"), cv2.COLOR_RGB2GRAY)
+        gray = cv2.cvtColor((img * 255).astype("uint8"), cv2.COLOR_RGB2GRAY)
         edges = cv2.Canny(gray, 50, 150)
 
-        edge_density = np.sum(edges) / (128*128)
-
-        # Debug
-        st.write("Edge Density:", edge_density)
-
-        if edge_density < 5:
-            return "INVALID DOCUMENT ❌"
-
+        edge_density = np.sum(edges) / (IMG_SIZE * IMG_SIZE)
         mean_pixel = np.mean(img)
 
-        if mean_pixel < 0.5:
+        if edge_density < 2:
+            return "INVALID DOCUMENT ❌"
+        elif mean_pixel < 0.5:
             return "FRAUD ⚠️"
         else:
             return "GENUINE ✅"
@@ -49,26 +57,19 @@ def predict_image(image):
         return f"ERROR: {str(e)}"
 
 
-# MAIN UI
-if uploaded_file is not None:
-    try:
-        image = Image.open(uploaded_file)
+# 🔹 MAIN OUTPUT
+if image is not None:
+    st.image(image, caption="Input Image", use_column_width=True)
 
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+    result = predict_image(image)
 
-        result = predict_image(image)
+    if "FRAUD" in result:
+        st.error("⚠️ Fraudulent Document Detected!")
+    elif "GENUINE" in result:
+        st.success("✅ Genuine Document")
+    elif "INVALID" in result:
+        st.warning("❌ Invalid Document (Not Aadhaar)")
+    else:
+        st.error(result)
 
-        # Show result ALWAYS
-        if "FRAUD" in result:
-            st.error("⚠️ Fraudulent Document Detected!")
-        elif "GENUINE" in result:
-            st.success("✅ Genuine Document")
-        elif "INVALID" in result:
-            st.warning("❌ Invalid Document (Not Aadhaar)")
-        else:
-            st.error(result)
-
-        st.write("Prediction:", result)
-
-    except Exception as e:
-        st.error(f"App Error: {str(e)}")
+    st.write("Prediction:", result)
