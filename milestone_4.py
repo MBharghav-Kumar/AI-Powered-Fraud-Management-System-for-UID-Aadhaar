@@ -43,7 +43,7 @@ st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Detect", "History"])
 
 # =========================
-# FACE DETECTION (BOX)
+# FACE DETECTION
 # =========================
 def detect_face(image):
     img = np.array(image)
@@ -59,7 +59,7 @@ def detect_face(image):
     return img, len(faces) > 0
 
 # =========================
-# QR DETECTION (IMPROVED)
+# QR DETECTION
 # =========================
 def detect_qr(image):
     img = np.array(image)
@@ -67,12 +67,10 @@ def detect_qr(image):
     gray = cv2.equalizeHist(gray)
 
     detector = cv2.QRCodeDetector()
-
     data, bbox, _ = detector.detectAndDecode(gray)
 
     if bbox is not None:
         bbox = bbox.astype(int)
-
         for i in range(len(bbox[0])):
             pt1 = tuple(bbox[0][i])
             pt2 = tuple(bbox[0][(i+1) % len(bbox[0])])
@@ -99,59 +97,48 @@ def detect_logo(image):
     return np.sum(mask) > 500
 
 # =========================
-# STRICT AADHAAR CHECK (UID REQUIRED)
+# IMPROVED OCR (UID CHECK)
 # =========================
 def is_aadhaar(image):
     try:
-        text = pytesseract.image_to_string(image)
+        gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
+
+        # Improve OCR
+        gray = cv2.GaussianBlur(gray, (3,3), 0)
+        gray = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)[1]
+
+        text = pytesseract.image_to_string(gray)
         st.write("🔍 OCR Text:", text)
 
-        # STRICT UID patterns
-        uid_patterns = [
-            r"\b\d{4}\s\d{4}\s\d{4}\b",
-            r"\b\d{12}\b",
-            r"\b\d{4}-\d{4}-\d{4}\b"
-        ]
+        uid_pattern = r"\d{4}\s?\d{4}\s?\d{4}"
+        uid_match = re.findall(uid_pattern, text)
 
-        uid_found = any(re.search(p, text) for p in uid_patterns)
-
-        keywords = [
-            "aadhaar",
-            "uidai",
-            "government of india"
-        ]
-
+        keywords = ["aadhaar", "uidai", "government of india"]
         keyword_found = any(word in text.lower() for word in keywords)
 
-        return uid_found and keyword_found
+        return bool(uid_match and keyword_found)
 
     except:
-        st.warning("⚠️ OCR not available")
+        st.warning("⚠️ OCR failed")
         return False
 
 # =========================
-# FRAUD DETECTION
+# LIGHT VALIDATION (NO FAKE MISCLASSIFICATION)
 # =========================
-def detect_fraud(image):
+def detect_quality(image):
     img = np.array(image)
-    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-    img = img / 255.0
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
-    gray = cv2.cvtColor((img*255).astype("uint8"), cv2.COLOR_RGB2GRAY)
     edges = cv2.Canny(gray, 50, 150)
+    edge_density = np.sum(edges) / (128*128)
 
-    edge_density = np.sum(edges) / (IMG_SIZE * IMG_SIZE)
-    mean_pixel = np.mean(img)
-
-    if edge_density < 2:
-        return "INVALID"
-    elif mean_pixel < 0.4:
-        return "FRAUD"
+    if edge_density < 1:
+        return "LOW_QUALITY"
     else:
-        return "GENUINE"
+        return "OK"
 
 # =========================
-# REPORT FUNCTIONS
+# REPORT
 # =========================
 def generate_csv(df):
     return df.to_csv(index=False).encode("utf-8")
@@ -166,11 +153,11 @@ def generate_pdf(df):
     data = [df.columns.tolist()] + df.values.tolist()
 
     table = Table(data)
-    table.setStyle(TableStyle([
+    table.setStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.grey),
         ("TEXTCOLOR",(0,0),(-1,0),colors.white),
         ("GRID", (0,0), (-1,-1), 1, colors.black)
-    ]))
+    ])
 
     doc.build([table])
     buffer.seek(0)
@@ -207,41 +194,39 @@ if page == "Detect":
 
         img_np = np.array(image)
 
-        # FACE + QR VISUAL
         img_face, face_flag = detect_face(img_np)
         img_qr, qr_flag = detect_qr(img_face)
 
         st.image(img_qr, caption="Detected Features")
 
-        # CHECKS
         aadhaar_flag = is_aadhaar(image)
         logo_flag = detect_logo(image)
+        quality_flag = detect_quality(image)
 
         st.write("Face:", face_flag)
         st.write("QR:", qr_flag)
         st.write("Logo:", logo_flag)
-        st.write("UID Valid:", aadhaar_flag)
+        st.write("UID Detected:", aadhaar_flag)
+        st.write("Quality:", quality_flag)
 
         # =========================
-        # FINAL DECISION (STRICT)
+        # FINAL DECISION
         # =========================
         if not aadhaar_flag:
             result = "NOT AADHAAR ❌"
-            st.error("❌ UID not detected — Not Aadhaar")
+            st.error("❌ UID not detected")
 
         elif not face_flag:
             result = "FAKE AADHAAR ❌"
-            st.error("❌ No face detected — Invalid Aadhaar")
+            st.error("❌ No face detected")
+
+        elif quality_flag == "LOW_QUALITY":
+            result = "SUSPICIOUS ⚠️"
+            st.warning("⚠️ Low quality image")
 
         else:
-            result = detect_fraud(image)
-
-            if result == "FRAUD":
-                st.error("⚠️ Fraudulent Aadhaar Detected")
-            elif result == "GENUINE":
-                st.success("✅ Genuine Aadhaar")
-            else:
-                st.warning("❌ Invalid Image")
+            result = "GENUINE ✅"
+            st.success("✅ Valid Aadhaar")
 
         st.write("Final Result:", result)
 
@@ -266,7 +251,6 @@ elif page == "History":
         st.dataframe(df)
 
         st.download_button("⬇️ Download CSV", generate_csv(df), "history.csv")
-
         st.download_button("⬇️ Download PDF", generate_pdf(df), "history.pdf")
 
     else:
