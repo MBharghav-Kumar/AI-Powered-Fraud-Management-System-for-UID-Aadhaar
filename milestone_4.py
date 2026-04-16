@@ -194,6 +194,7 @@ if page == "Detect":
         # Save history
         record = {
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Name": user_name,
             "Result": result
         }
 
