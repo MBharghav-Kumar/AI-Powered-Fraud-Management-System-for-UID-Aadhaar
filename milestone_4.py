@@ -12,14 +12,14 @@ import re
 # TESSERACT CONFIG (LOCAL ONLY)
 # =========================
 try:
-    if os.name == "nt":  # Windows
+    if os.name == "nt":
         pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 except:
     pass
 
 IMG_SIZE = 128
 
-# Haar cascade for face detection
+# Load face cascade
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
@@ -42,19 +42,47 @@ st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Detect", "History"])
 
 # =========================
-# FACE DETECTION
+# FACE DETECTION WITH BOX
 # =========================
 def detect_face(image):
-    try:
-        img = np.array(image)
-        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-        return len(faces) > 0
-    except:
-        return False
+    img = np.array(image)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+
+    for (x, y, w, h) in faces:
+        cv2.rectangle(img, (x, y), (x+w, y+h), (0,255,0), 2)
+        cv2.putText(img, "FACE", (x, y-10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+
+    return img, len(faces) > 0
 
 # =========================
-# LOGO DETECTION (ORANGE COLOR)
+# QR DETECTION WITH BOX
+# =========================
+def detect_qr(image):
+    img = np.array(image)
+
+    detector = cv2.QRCodeDetector()
+    data, bbox, _ = detector.detectAndDecode(img)
+
+    if bbox is not None:
+        bbox = bbox.astype(int)
+
+        for i in range(len(bbox[0])):
+            pt1 = tuple(bbox[0][i])
+            pt2 = tuple(bbox[0][(i+1) % len(bbox[0])])
+            cv2.line(img, pt1, pt2, (0,255,0), 2)
+
+        cv2.putText(img, "QR", tuple(bbox[0][0]),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+
+        return img, True
+
+    return img, False
+
+# =========================
+# LOGO DETECTION
 # =========================
 def detect_logo(image):
     img = np.array(image)
@@ -67,12 +95,11 @@ def detect_logo(image):
     return np.sum(mask) > 500
 
 # =========================
-# OCR + FALLBACK AADHAAR CHECK
+# OCR + FALLBACK
 # =========================
 def is_aadhaar(image):
     try:
         text = pytesseract.image_to_string(image)
-
         st.write("🔍 OCR Text:", text)
 
         uid_patterns = [
@@ -98,11 +125,10 @@ def is_aadhaar(image):
     except:
         st.warning("⚠️ OCR not available, using fallback detection")
 
-    # FALLBACK (WORKS ON CLOUD)
-    return detect_face(image) and detect_logo(image)
+    return detect_logo(image)  # fallback improved
 
 # =========================
-# FRAUD CHECK
+# FRAUD DETECTION
 # =========================
 def detect_fraud(image):
     img = np.array(image)
@@ -134,7 +160,7 @@ def generate_report(record):
 # =========================
 if page == "Detect":
 
-    st.title(" Aadhaar Fraud Detection System")
+    st.title("🪪 Aadhaar Fraud Detection System")
 
     option = st.radio("Select Input Method:", ["Upload Image", "Use Camera"])
 
@@ -151,24 +177,36 @@ if page == "Detect":
             image = Image.open(file)
 
     if image:
-        st.image(image, caption="Input Image", use_column_width=True)
+        st.image(image, caption="Original Image", use_column_width=True)
 
-        # NEW: NAME INPUT
+        # NAME INPUT
         user_name = st.text_input("Enter Name (as per Aadhaar):")
 
         if not user_name:
             st.warning("Please enter name before proceeding")
             st.stop()
-        st.write("Name:", user_name)
 
-        # Checks
+        st.write("👤 Name:", user_name)
+
+        # PROCESS IMAGE
+        img_np = np.array(image)
+
+        # Face detection
+        img_face, face_flag = detect_face(img_np)
+
+        # QR detection
+        img_qr, qr_flag = detect_qr(img_face)
+
+        st.image(img_qr, caption="Detected Features", use_column_width=True)
+
+        # Aadhaar + logo + face
         aadhaar_flag = is_aadhaar(image)
-        face_flag = detect_face(image)
         logo_flag = detect_logo(image)
 
         st.write("🔍 Aadhaar Check:", aadhaar_flag)
         st.write("🙂 Face Detected:", face_flag)
         st.write("🎨 Logo Detected:", logo_flag)
+        st.write("🔳 QR Detected:", qr_flag)
 
         # FINAL DECISION
         if not aadhaar_flag:
@@ -191,7 +229,7 @@ if page == "Detect":
 
         st.write("Final Result:", result)
 
-        # Save history
+        # SAVE HISTORY
         record = {
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Name": user_name,
@@ -200,7 +238,7 @@ if page == "Detect":
 
         st.session_state.history.append(record)
 
-        # Download report
+        # DOWNLOAD REPORT
         st.download_button(
             "Download Report",
             data=generate_report(record),
