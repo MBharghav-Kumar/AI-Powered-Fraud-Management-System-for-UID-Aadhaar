@@ -134,7 +134,7 @@ def generate_report(record):
 # =========================
 if page == "Detect":
 
-    st.title("🪪 Aadhaar Fraud Detection System")
+    st.title(" Aadhaar Fraud Detection System")
 
     option = st.radio("Select Input Method:", ["Upload Image", "Use Camera"])
 
@@ -152,6 +152,14 @@ if page == "Detect":
 
     if image:
         st.image(image, caption="Input Image", use_column_width=True)
+
+        # NEW: NAME INPUT
+        user_name = st.text_input("Enter Name (as per Aadhaar):")
+
+        if not user_name:
+            st.warnings("Please enter name before proceeding")
+            st.stop()
+        st.write("Name:", user_name)
 
         # Checks
         aadhaar_flag = is_aadhaar(image)
