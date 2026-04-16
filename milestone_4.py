@@ -42,7 +42,7 @@ st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Detect", "History"])
 
 # =========================
-# FACE DETECTION WITH BOX
+# FACE DETECTION (WITH BOX)
 # =========================
 def detect_face(image):
     img = np.array(image)
@@ -58,19 +58,16 @@ def detect_face(image):
     return img, len(faces) > 0
 
 # =========================
-# QR DETECTION WITH BOX
+# QR DETECTION (IMPROVED)
 # =========================
 def detect_qr(image):
     img = np.array(image)
-
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-
-    # Improve contrast
     gray = cv2.equalizeHist(gray)
 
-    # Try multiple scales
     detector = cv2.QRCodeDetector()
 
+    # First attempt
     data, bbox, _ = detector.detectAndDecode(gray)
 
     if bbox is not None:
@@ -86,13 +83,12 @@ def detect_qr(image):
 
         return img, True
 
-    # SECOND ATTEMPT (resize boost)
+    # Second attempt (zoom)
     resized = cv2.resize(gray, None, fx=2, fy=2)
-
     data, bbox, _ = detector.detectAndDecode(resized)
 
     if bbox is not None:
-        bbox = bbox.astype(int) // 2  # scale back
+        bbox = bbox.astype(int) // 2
 
         for i in range(len(bbox[0])):
             pt1 = tuple(bbox[0][i])
@@ -150,7 +146,7 @@ def is_aadhaar(image):
     except:
         st.warning("⚠️ OCR not available, using fallback detection")
 
-    return detect_logo(image)  # fallback improved
+    return detect_logo(image)
 
 # =========================
 # FRAUD DETECTION
@@ -204,7 +200,6 @@ if page == "Detect":
     if image:
         st.image(image, caption="Original Image", use_column_width=True)
 
-        # NAME INPUT
         user_name = st.text_input("Enter Name (as per Aadhaar):")
 
         if not user_name:
@@ -213,18 +208,17 @@ if page == "Detect":
 
         st.write("👤 Name:", user_name)
 
-        # PROCESS IMAGE
         img_np = np.array(image)
 
-        # Face detection
+        # FACE
         img_face, face_flag = detect_face(img_np)
 
-        # QR detection
+        # QR
         img_qr, qr_flag = detect_qr(img_face)
 
         st.image(img_qr, caption="Detected Features", use_column_width=True)
 
-        # Aadhaar + logo + face
+        # Other checks
         aadhaar_flag = is_aadhaar(image)
         logo_flag = detect_logo(image)
 
@@ -233,14 +227,16 @@ if page == "Detect":
         st.write("🎨 Logo Detected:", logo_flag)
         st.write("🔳 QR Detected:", qr_flag)
 
-        # FINAL DECISION
+        # =========================
+        # FINAL DECISION (STRICT)
+        # =========================
         if not aadhaar_flag:
             result = "NOT AADHAAR ❌"
             st.error(result)
 
         elif not face_flag:
-            result = "NO FACE FOUND ❌"
-            st.warning(result)
+            result = "FAKE AADHAAR (NO FACE) ❌"
+            st.error("❌ No face detected — Invalid Aadhaar")
 
         else:
             result = detect_fraud(image)
@@ -263,7 +259,7 @@ if page == "Detect":
 
         st.session_state.history.append(record)
 
-        # DOWNLOAD REPORT
+        # DOWNLOAD
         st.download_button(
             "Download Report",
             data=generate_report(record),
