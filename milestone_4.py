@@ -157,7 +157,7 @@ if page == "Detect":
         user_name = st.text_input("Enter Name (as per Aadhaar):")
 
         if not user_name:
-            st.warnings("Please enter name before proceeding")
+            st.warning("Please enter name before proceeding")
             st.stop()
         st.write("Name:", user_name)
 
