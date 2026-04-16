@@ -63,12 +63,14 @@ def detect_face(image):
 def detect_qr(image):
     img = np.array(image)
 
-    gary = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
-    #Improve contrast
+    # Improve contrast
     gray = cv2.equalizeHist(gray)
 
+    # Try multiple scales
     detector = cv2.QRCodeDetector()
+
     data, bbox, _ = detector.detectAndDecode(gray)
 
     if bbox is not None:
@@ -85,24 +87,24 @@ def detect_qr(image):
         return img, True
 
     # SECOND ATTEMPT (resize boost)
-    resized = cv2.resize(gray, None, (fx=2, fy=2)
+    resized = cv2.resize(gray, None, fx=2, fy=2)
 
     data, bbox, _ = detector.detectAndDecode(resized)
 
     if bbox is not None:
-        bbox = bbox.astype(int) // 2 # scale back
+        bbox = bbox.astype(int) // 2  # scale back
 
-    for i in range(len(bbox[0])):
-        pt1 = tuple(bbox[0][i])
-        pt2 = tuple(bbox[0][i])
-        cv2.line(img, pt1, pt2, (0,255,0), 2)
+        for i in range(len(bbox[0])):
+            pt1 = tuple(bbox[0][i])
+            pt2 = tuple(bbox[0][(i+1) % len(bbox[0])])
+            cv2.line(img, pt1, pt2, (0,255,0), 2)
 
-    cv2.putText(img, "QR", tuple(bbox[0][0]),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
-    return img, True
-    
+        cv2.putText(img, "QR", tuple(bbox[0][0]),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
 
-return img, False
+        return img, True
+
+    return img, False
 
 # =========================
 # LOGO DETECTION
