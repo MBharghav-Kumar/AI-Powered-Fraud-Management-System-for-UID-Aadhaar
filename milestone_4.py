@@ -5,51 +5,76 @@ from PIL import Image
 import pandas as pd
 from datetime import datetime
 import pytesseract
+import os
 import re
+
+# =========================
+# TESSERACT CONFIG (LOCAL ONLY)
+# =========================
+try:
+    if os.name == "nt":  # Windows
+        pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+except:
+    pass
 
 IMG_SIZE = 128
 
-# Use built-in Haar cascade (NO FILE NEEDED)
+# Haar cascade for face detection
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
+# =========================
+# PAGE CONFIG
+# =========================
 st.set_page_config(page_title="Aadhaar Fraud Detection", layout="centered")
 
 # =========================
-# SESSION STATE (History)
+# SESSION HISTORY
 # =========================
 if "history" not in st.session_state:
     st.session_state.history = []
 
 # =========================
-# SIDEBAR NAVIGATION
+# SIDEBAR
 # =========================
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Detect", "History"])
 
 # =========================
-# OCR PREPROCESSING
+# FACE DETECTION
 # =========================
-def preprocess_for_ocr(image):
-    img = np.array(image)
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    gray = cv2.equalizeHist(gray)
-    gray = cv2.GaussianBlur(gray, (3,3), 0)
-    return gray
+def detect_face(image):
+    try:
+        img = np.array(image)
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        return len(faces) > 0
+    except:
+        return False
 
 # =========================
-# AADHAAR TEXT CHECK (IMPROVED)
+# LOGO DETECTION (ORANGE COLOR)
+# =========================
+def detect_logo(image):
+    img = np.array(image)
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+
+    lower_orange = np.array([5, 100, 100])
+    upper_orange = np.array([20, 255, 255])
+
+    mask = cv2.inRange(hsv, lower_orange, upper_orange)
+    return np.sum(mask) > 500
+
+# =========================
+# OCR + FALLBACK AADHAAR CHECK
 # =========================
 def is_aadhaar(image):
     try:
-        processed = preprocess_for_ocr(image)
-        text = pytesseract.image_to_string(processed)
+        text = pytesseract.image_to_string(image)
 
-        # DEBUG (optional)
         st.write("🔍 OCR Text:", text)
 
-        # Flexible UID patterns
         uid_patterns = [
             r"\d{4}\s\d{4}\s\d{4}",
             r"\d{12}",
@@ -62,54 +87,22 @@ def is_aadhaar(image):
             "aadhaar",
             "uidai",
             "government of india",
-            "year of birth",
-            "male",
-            "female"
+            "year of birth"
         ]
 
         keyword_score = sum(word in text.lower() for word in keywords)
 
-        # RELAXED CONDITION
-        return uid_found or keyword_score >= 2
-
-    except Exception as e:
-        st.error(f"OCR Error: {str(e)}")
-        return False
-
-# =========================
-# FACE DETECTION (SAFE)
-# =========================
-def detect_face(image):
-    try:
-        if face_cascade.empty():
-            return False
-
-        img = np.array(image)
-        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-
-        return len(faces) > 0
+        if uid_found or keyword_score >= 1:
+            return True
 
     except:
-        return False
+        st.warning("⚠️ OCR not available, using fallback detection")
+
+    # FALLBACK (WORKS ON CLOUD)
+    return detect_face(image) and detect_logo(image)
 
 # =========================
-# LOGO DETECTION
-# =========================
-def detect_logo(image):
-    img = np.array(image)
-    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-
-    lower_orange = np.array([5, 100, 100])
-    upper_orange = np.array([20, 255, 255])
-
-    mask = cv2.inRange(hsv, lower_orange, upper_orange)
-
-    return np.sum(mask) > 500
-
-# =========================
-# FRAUD DETECTION (LIGHTWEIGHT)
+# FRAUD CHECK
 # =========================
 def detect_fraud(image):
     img = np.array(image)
@@ -130,18 +123,18 @@ def detect_fraud(image):
         return "GENUINE"
 
 # =========================
-# REPORT GENERATION
+# REPORT
 # =========================
 def generate_report(record):
     df = pd.DataFrame([record])
     return df.to_csv(index=False).encode("utf-8")
 
 # =========================
-# PAGE: DETECT
+# DETECT PAGE
 # =========================
 if page == "Detect":
 
-    st.title("Aadhaar Fraud Detection System")
+    st.title("🪪 Aadhaar Fraud Detection System")
 
     option = st.radio("Select Input Method:", ["Upload Image", "Use Camera"])
 
@@ -158,19 +151,19 @@ if page == "Detect":
             image = Image.open(file)
 
     if image:
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+        st.image(image, caption="Input Image", use_column_width=True)
 
         # Checks
         aadhaar_flag = is_aadhaar(image)
         face_flag = detect_face(image)
         logo_flag = detect_logo(image)
 
-        st.write("🔍 Aadhaar Text Check:", aadhaar_flag)
+        st.write("🔍 Aadhaar Check:", aadhaar_flag)
         st.write("🙂 Face Detected:", face_flag)
         st.write("🎨 Logo Detected:", logo_flag)
 
-        # FINAL DECISION (IMPROVED LOGIC)
-        if not (aadhaar_flag or logo_flag):
+        # FINAL DECISION
+        if not aadhaar_flag:
             result = "NOT AADHAAR ❌"
             st.error(result)
 
@@ -190,7 +183,7 @@ if page == "Detect":
 
         st.write("Final Result:", result)
 
-        # Save to history
+        # Save history
         record = {
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Result": result
@@ -207,7 +200,7 @@ if page == "Detect":
         )
 
 # =========================
-# PAGE: HISTORY
+# HISTORY PAGE
 # =========================
 elif page == "History":
 
@@ -221,4 +214,4 @@ elif page == "History":
 
     if st.button("Clear History"):
         st.session_state.history = []
-        st.success("History Cleared!")
+        st.success("History cleared!")
