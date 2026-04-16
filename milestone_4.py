@@ -97,33 +97,50 @@ def detect_logo(image):
     return np.sum(mask) > 500
 
 # =========================
-# IMPROVED OCR (UID CHECK)
+# STRONG OCR (UID DETECTION)
 # =========================
-def is_aadhaar(image):
+def extract_uid_and_check(image):
     try:
-        gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
+        img = np.array(image)
 
-        # Improve OCR
-        gray = cv2.GaussianBlur(gray, (3,3), 0)
-        gray = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)[1]
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
-        text = pytesseract.image_to_string(gray)
+        # Improve contrast
+        gray = cv2.convertScaleAbs(gray, alpha=1.5, beta=0)
+
+        # Blur + threshold
+        gray = cv2.GaussianBlur(gray, (5,5), 0)
+        thresh = cv2.adaptiveThreshold(
+            gray, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            11, 2
+        )
+
+        text = pytesseract.image_to_string(thresh)
+
         st.write("🔍 OCR Text:", text)
 
-        uid_pattern = r"\d{4}\s?\d{4}\s?\d{4}"
-        uid_match = re.findall(uid_pattern, text)
+        # Remove spaces/newlines
+        cleaned = re.sub(r"\s+", "", text)
 
-        keywords = ["aadhaar", "uidai", "government of india"]
-        keyword_found = any(word in text.lower() for word in keywords)
+        # Find UID (12 digits continuous)
+        uid_match = re.findall(r"\d{12}", cleaned)
 
-        return bool(uid_match and keyword_found)
+        keywords = ["aadhaar", "uidai", "governmentofindia"]
+        keyword_found = any(word in cleaned.lower() for word in keywords)
 
-    except:
-        st.warning("⚠️ OCR failed")
-        return False
+        if uid_match:
+            st.success(f"Detected UID: {uid_match[0]}")
+
+        return bool(uid_match and keyword_found), uid_match
+
+    except Exception as e:
+        st.warning(f"OCR failed: {e}")
+        return False, []
 
 # =========================
-# LIGHT VALIDATION (NO FAKE MISCLASSIFICATION)
+# QUALITY CHECK
 # =========================
 def detect_quality(image):
     img = np.array(image)
@@ -194,27 +211,32 @@ if page == "Detect":
 
         img_np = np.array(image)
 
+        # Feature detection
         img_face, face_flag = detect_face(img_np)
         img_qr, qr_flag = detect_qr(img_face)
 
         st.image(img_qr, caption="Detected Features")
 
-        aadhaar_flag = is_aadhaar(image)
+        aadhaar_flag, uid_list = extract_uid_and_check(image)
         logo_flag = detect_logo(image)
         quality_flag = detect_quality(image)
 
         st.write("Face:", face_flag)
         st.write("QR:", qr_flag)
         st.write("Logo:", logo_flag)
-        st.write("UID Detected:", aadhaar_flag)
+        st.write("UID Valid:", aadhaar_flag)
         st.write("Quality:", quality_flag)
 
         # =========================
-        # FINAL DECISION
+        # FINAL DECISION (SMART)
         # =========================
         if not aadhaar_flag:
-            result = "NOT AADHAAR ❌"
-            st.error("❌ UID not detected")
+            if face_flag and logo_flag:
+                result = "POSSIBLE AADHAAR ⚠️"
+                st.warning("⚠️ UID not detected, but looks like Aadhaar")
+            else:
+                result = "NOT AADHAAR ❌"
+                st.error("❌ Not an Aadhaar")
 
         elif not face_flag:
             result = "FAKE AADHAAR ❌"
