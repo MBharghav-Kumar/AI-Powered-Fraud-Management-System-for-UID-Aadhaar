@@ -141,7 +141,7 @@ def generate_report(record):
 # =========================
 if page == "Detect":
 
-    st.title("🪪 Aadhaar Fraud Detection System")
+    st.title("Aadhaar Fraud Detection System")
 
     option = st.radio("Select Input Method:", ["Upload Image", "Use Camera"])
 
