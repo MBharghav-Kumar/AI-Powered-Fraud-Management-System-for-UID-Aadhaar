@@ -20,6 +20,7 @@ except:
 
 IMG_SIZE = 128
 
+# Load face cascade
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
@@ -42,7 +43,7 @@ st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Detect", "History"])
 
 # =========================
-# FACE DETECTION
+# FACE DETECTION (BOX)
 # =========================
 def detect_face(image):
     img = np.array(image)
@@ -58,7 +59,7 @@ def detect_face(image):
     return img, len(faces) > 0
 
 # =========================
-# QR DETECTION
+# QR DETECTION (IMPROVED)
 # =========================
 def detect_qr(image):
     img = np.array(image)
@@ -98,17 +99,18 @@ def detect_logo(image):
     return np.sum(mask) > 500
 
 # =========================
-# OCR CHECK
+# STRICT AADHAAR CHECK (UID REQUIRED)
 # =========================
 def is_aadhaar(image):
     try:
         text = pytesseract.image_to_string(image)
         st.write("🔍 OCR Text:", text)
 
+        # STRICT UID patterns
         uid_patterns = [
-            r"\d{4}\s\d{4}\s\d{4}",
-            r"\d{12}",
-            r"\d{4}-\d{4}-\d{4}"
+            r"\b\d{4}\s\d{4}\s\d{4}\b",
+            r"\b\d{12}\b",
+            r"\b\d{4}-\d{4}-\d{4}\b"
         ]
 
         uid_found = any(re.search(p, text) for p in uid_patterns)
@@ -116,19 +118,16 @@ def is_aadhaar(image):
         keywords = [
             "aadhaar",
             "uidai",
-            "government of india",
-            "year of birth"
+            "government of india"
         ]
 
-        keyword_score = sum(word in text.lower() for word in keywords)
+        keyword_found = any(word in text.lower() for word in keywords)
 
-        if uid_found or keyword_score >= 1:
-            return True
+        return uid_found and keyword_found
 
     except:
         st.warning("⚠️ OCR not available")
-
-    return detect_logo(image)
+        return False
 
 # =========================
 # FRAUD DETECTION
@@ -152,14 +151,11 @@ def detect_fraud(image):
         return "GENUINE"
 
 # =========================
-# CSV REPORT
+# REPORT FUNCTIONS
 # =========================
 def generate_csv(df):
     return df.to_csv(index=False).encode("utf-8")
 
-# =========================
-# PDF REPORT
-# =========================
 def generate_pdf(df):
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
     from reportlab.lib import colors
@@ -176,9 +172,7 @@ def generate_pdf(df):
         ("GRID", (0,0), (-1,-1), 1, colors.black)
     ]))
 
-    elements = [table]
-    doc.build(elements)
-
+    doc.build([table])
     buffer.seek(0)
     return buffer
 
@@ -194,7 +188,7 @@ if page == "Detect":
     image = None
 
     if option == "Upload Image":
-        file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+        file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
         if file:
             image = Image.open(file)
     else:
@@ -213,27 +207,45 @@ if page == "Detect":
 
         img_np = np.array(image)
 
+        # FACE + QR VISUAL
         img_face, face_flag = detect_face(img_np)
         img_qr, qr_flag = detect_qr(img_face)
 
         st.image(img_qr, caption="Detected Features")
 
+        # CHECKS
         aadhaar_flag = is_aadhaar(image)
         logo_flag = detect_logo(image)
 
         st.write("Face:", face_flag)
         st.write("QR:", qr_flag)
         st.write("Logo:", logo_flag)
+        st.write("UID Valid:", aadhaar_flag)
 
+        # =========================
+        # FINAL DECISION (STRICT)
+        # =========================
         if not aadhaar_flag:
             result = "NOT AADHAAR ❌"
+            st.error("❌ UID not detected — Not Aadhaar")
+
         elif not face_flag:
             result = "FAKE AADHAAR ❌"
+            st.error("❌ No face detected — Invalid Aadhaar")
+
         else:
             result = detect_fraud(image)
 
+            if result == "FRAUD":
+                st.error("⚠️ Fraudulent Aadhaar Detected")
+            elif result == "GENUINE":
+                st.success("✅ Genuine Aadhaar")
+            else:
+                st.warning("❌ Invalid Image")
+
         st.write("Final Result:", result)
 
+        # SAVE HISTORY
         record = {
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Name": user_name,
@@ -251,24 +263,11 @@ elif page == "History":
 
     if st.session_state.history:
         df = pd.DataFrame(st.session_state.history)
-
         st.dataframe(df)
 
-        # CSV Download
-        st.download_button(
-            "⬇️ Download CSV",
-            generate_csv(df),
-            "history.csv",
-            "text/csv"
-        )
+        st.download_button("⬇️ Download CSV", generate_csv(df), "history.csv")
 
-        # PDF Download
-        st.download_button(
-            "⬇️ Download PDF",
-            generate_pdf(df),
-            "history.pdf",
-            "application/pdf"
-        )
+        st.download_button("⬇️ Download PDF", generate_pdf(df), "history.pdf")
 
     else:
         st.write("No history available.")
