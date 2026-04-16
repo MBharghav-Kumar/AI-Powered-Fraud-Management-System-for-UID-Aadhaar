@@ -9,136 +9,180 @@ import re
 
 IMG_SIZE = 128
 
-st.set_page_config(page_title="Fraud Detection", layout="centered")
+# Load face detector
+face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+
+st.set_page_config(page_title="Aadhaar Fraud Detection", layout="centered")
 
 # =========================
-# INIT HISTORY
+# SESSION STATE
 # =========================
 if "history" not in st.session_state:
     st.session_state.history = []
 
 # =========================
-# SIDEBAR NAVIGATION
+# SIDEBAR
 # =========================
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to", ["Detect Fraud", "View History"])
+page = st.sidebar.radio("Go to", ["Detect", "History"])
 
 # =========================
-# AADHAAR VALIDATION FUNCTION
+# OCR + Aadhaar Validation
 # =========================
 def is_aadhaar(image):
     try:
         text = pytesseract.image_to_string(image)
 
-        # Aadhaar number pattern
         uid = re.findall(r"\d{4}\s\d{4}\s\d{4}", text)
 
-        # Keywords check
         keywords = ["aadhaar", "uidai", "government of india"]
-        found_keyword = any(word in text.lower() for word in keywords)
+        keyword_score = sum(word in text.lower() for word in keywords)
 
-        if len(uid) > 0 and found_keyword:
-            return True
-        else:
-            return False
+        return len(uid) > 0 or keyword_score >= 1
     except:
         return False
 
 # =========================
-# FRAUD DETECTION FUNCTION
+# FACE DETECTION
 # =========================
-def predict_image(image):
-    try:
-        img = np.array(image)
+def detect_face(image):
+    img = np.array(image)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
-        if img is None or img.size == 0:
-            return "ERROR"
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
-        if len(img.shape) == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-
-        img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-        img = img / 255.0
-
-        gray = cv2.cvtColor((img * 255).astype("uint8"), cv2.COLOR_RGB2GRAY)
-        edges = cv2.Canny(gray, 50, 150)
-
-        edge_density = np.sum(edges) / (IMG_SIZE * IMG_SIZE)
-        mean_pixel = np.mean(img)
-
-        if edge_density < 2:
-            return "INVALID"
-        elif mean_pixel < 0.5:
-            return "FRAUD"
-        else:
-            return "GENUINE"
-
-    except:
-        return "ERROR"
+    return len(faces) > 0
 
 # =========================
-# PAGE 1: DETECT FRAUD
+# LOGO DETECTION (simple color check)
 # =========================
-if page == "Detect Fraud":
+def detect_logo(image):
+    img = np.array(image)
 
-    st.title("AI Powered Aadhaar Fraud Detection System")
+    # Aadhaar logo has orange + green tones
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
 
-    option = st.radio("Choose Input Method:", ["Upload Image", "Capture Image"])
+    lower_orange = np.array([5, 100, 100])
+    upper_orange = np.array([20, 255, 255])
+
+    mask = cv2.inRange(hsv, lower_orange, upper_orange)
+
+    return np.sum(mask) > 500
+
+# =========================
+# FRAUD DETECTION (lightweight CNN alternative)
+# =========================
+def detect_fraud(image):
+    img = np.array(image)
+    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+    img = img / 255.0
+
+    gray = cv2.cvtColor((img * 255).astype("uint8"), cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+
+    edge_density = np.sum(edges) / (IMG_SIZE * IMG_SIZE)
+    mean_pixel = np.mean(img)
+
+    if edge_density < 2:
+        return "INVALID"
+    elif mean_pixel < 0.4:
+        return "FRAUD"
+    else:
+        return "GENUINE"
+
+# =========================
+# REPORT DOWNLOAD
+# =========================
+def generate_report(result):
+    df = pd.DataFrame([result])
+    return df.to_csv(index=False).encode('utf-8')
+
+# =========================
+# PAGE: DETECT
+# =========================
+if page == "Detect":
+
+    st.title("🪪 Aadhaar Fraud Detection System")
+
+    option = st.radio("Input Method:", ["Upload", "Camera"])
 
     image = None
 
-    if option == "Upload Image":
-        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"])
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
+    if option == "Upload":
+        file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+        if file:
+            image = Image.open(file)
 
-    elif option == "Capture Image":
-        captured_image = st.camera_input("Capture Aadhaar Image")
-        if captured_image is not None:
-            image = Image.open(captured_image)
+    else:
+        file = st.camera_input("Capture Image")
+        if file:
+            image = Image.open(file)
 
-    if image is not None:
-        st.image(image, caption="Input Image", use_column_width=True)
+    if image:
+        st.image(image, caption="Input", use_column_width=True)
 
-        # STEP 1: Check Aadhaar
-        if not is_aadhaar(image):
+        # STEP 1: Aadhaar check
+        aadhaar_flag = is_aadhaar(image)
+
+        # STEP 2: Face check
+        face_flag = detect_face(image)
+
+        # STEP 3: Logo check
+        logo_flag = detect_logo(image)
+
+        st.write("🔍 Aadhaar Text Check:", aadhaar_flag)
+        st.write("🙂 Face Detected:", face_flag)
+        st.write("🎨 Logo Detected:", logo_flag)
+
+        # FINAL DECISION
+        if not aadhaar_flag:
             result = "NOT AADHAAR ❌"
-            st.warning("❌ Uploaded document is NOT Aadhaar")
+            st.error(result)
+
+        elif not face_flag:
+            result = "NO FACE FOUND ❌"
+            st.warning(result)
 
         else:
-            # STEP 2: Fraud Detection
-            result = predict_image(image)
+            result = detect_fraud(image)
 
             if result == "FRAUD":
-                st.error("⚠️ Fraudulent Document Detected!")
+                st.error("⚠️ Fraud Detected")
             elif result == "GENUINE":
-                st.success("✅ Genuine Aadhaar Document")
-            elif result == "INVALID":
-                st.warning("❌ Invalid Aadhaar Image")
+                st.success("✅ Genuine Aadhaar")
             else:
-                st.error("Error processing image")
+                st.warning("❌ Invalid Image")
 
-        st.write("Prediction:", result)
+        st.write("Final Result:", result)
 
-        # SAVE HISTORY
-        st.session_state.history.append({
+        # Save history
+        record = {
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Result": result
-        })
+        }
+        st.session_state.history.append(record)
+
+        # Download report
+        st.download_button(
+            label="Download Report",
+            data=generate_report(record),
+            file_name="report.csv",
+            mime="text/csv"
+        )
 
 # =========================
-# PAGE 2: HISTORY
+# PAGE: HISTORY
 # =========================
-elif page == "View History":
+elif page == "History":
 
-    st.title("📜 Detection History")
+    st.title("📜 History")
 
-    if len(st.session_state.history) > 0:
+    if st.session_state.history:
         df = pd.DataFrame(st.session_state.history)
         st.dataframe(df)
     else:
-        st.write("No history available")
+        st.write("No history")
 
     if st.button("Clear History"):
         st.session_state.history = []
-        st.success("History Cleared!")
+        st.success("Cleared")
