@@ -2,18 +2,22 @@ import streamlit as st
 import numpy as np
 import cv2
 from PIL import Image
+import pandas as pd
+from datetime import datetime
 
 IMG_SIZE = 128
 
 st.set_page_config(page_title="Fraud Detection", layout="centered")
 
 st.title("AI Powered Aadhaar Fraud Detection System")
-st.write("Upload or capture an Aadhaar image to check if it is Genuine or Fraud.")
 
-# 🔹 OPTION SELECTOR
+# 🔹 Initialize history
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# 🔹 Input option
 option = st.radio("Choose Input Method:", ["Upload Image", "Capture Image"])
 
-# 🔹 INPUT HANDLING
 image = None
 
 if option == "Upload Image":
@@ -26,13 +30,13 @@ elif option == "Capture Image":
     if captured_image is not None:
         image = Image.open(captured_image)
 
-# 🔹 PREDICTION FUNCTION
+# 🔹 Prediction function
 def predict_image(image):
     try:
         img = np.array(image)
 
         if img is None or img.size == 0:
-            return "ERROR: Invalid Image"
+            return "ERROR"
 
         if len(img.shape) == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
@@ -47,29 +51,46 @@ def predict_image(image):
         mean_pixel = np.mean(img)
 
         if edge_density < 2:
-            return "INVALID DOCUMENT ❌"
+            return "INVALID"
         elif mean_pixel < 0.5:
-            return "FRAUD ⚠️"
+            return "FRAUD"
         else:
-            return "GENUINE ✅"
+            return "GENUINE"
 
-    except Exception as e:
-        return f"ERROR: {str(e)}"
+    except:
+        return "ERROR"
 
-
-# 🔹 MAIN OUTPUT
+# 🔹 Process image
 if image is not None:
     st.image(image, caption="Input Image", use_column_width=True)
 
     result = predict_image(image)
 
-    if "FRAUD" in result:
+    # Display result
+    if result == "FRAUD":
         st.error("⚠️ Fraudulent Document Detected!")
-    elif "GENUINE" in result:
+    elif result == "GENUINE":
         st.success("✅ Genuine Document")
-    elif "INVALID" in result:
-        st.warning("❌ Invalid Document (Not Aadhaar)")
+    elif result == "INVALID":
+        st.warning("❌ Invalid Document")
     else:
-        st.error(result)
+        st.error("Error processing image")
 
-    st.write("Prediction:", result)
+    # 🔹 Save to history
+    st.session_state.history.append({
+        "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Result": result
+    })
+
+# 🔹 Show history
+st.subheader("📜 Detection History")
+
+if len(st.session_state.history) > 0:
+    df = pd.DataFrame(st.session_state.history)
+    st.dataframe(df)
+else:
+    st.write("No history yet")
+
+# 🔹 Clear history button
+if st.button("Clear History"):
+    st.session_state.history = []
