@@ -4,18 +4,77 @@ import cv2
 from PIL import Image
 import pandas as pd
 from datetime import datetime
+import pytesseract
+import re
 
 IMG_SIZE = 128
 
 st.set_page_config(page_title="Fraud Detection", layout="centered")
 
-# 🔹 Initialize history
+# =========================
+# INIT HISTORY
+# =========================
 if "history" not in st.session_state:
     st.session_state.history = []
 
-# 🔹 SIDEBAR NAVIGATION
+# =========================
+# SIDEBAR NAVIGATION
+# =========================
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Detect Fraud", "View History"])
+
+# =========================
+# AADHAAR VALIDATION FUNCTION
+# =========================
+def is_aadhaar(image):
+    try:
+        text = pytesseract.image_to_string(image)
+
+        # Aadhaar number pattern
+        uid = re.findall(r"\d{4}\s\d{4}\s\d{4}", text)
+
+        # Keywords check
+        keywords = ["aadhaar", "uidai", "government of india"]
+        found_keyword = any(word in text.lower() for word in keywords)
+
+        if len(uid) > 0 and found_keyword:
+            return True
+        else:
+            return False
+    except:
+        return False
+
+# =========================
+# FRAUD DETECTION FUNCTION
+# =========================
+def predict_image(image):
+    try:
+        img = np.array(image)
+
+        if img is None or img.size == 0:
+            return "ERROR"
+
+        if len(img.shape) == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+
+        img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+        img = img / 255.0
+
+        gray = cv2.cvtColor((img * 255).astype("uint8"), cv2.COLOR_RGB2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+
+        edge_density = np.sum(edges) / (IMG_SIZE * IMG_SIZE)
+        mean_pixel = np.mean(img)
+
+        if edge_density < 2:
+            return "INVALID"
+        elif mean_pixel < 0.5:
+            return "FRAUD"
+        else:
+            return "GENUINE"
+
+    except:
+        return "ERROR"
 
 # =========================
 # PAGE 1: DETECT FRAUD
@@ -38,57 +97,37 @@ if page == "Detect Fraud":
         if captured_image is not None:
             image = Image.open(captured_image)
 
-    def predict_image(image):
-        try:
-            img = np.array(image)
-
-            if img is None or img.size == 0:
-                return "ERROR"
-
-            if len(img.shape) == 2:
-                img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-
-            img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-            img = img / 255.0
-
-            gray = cv2.cvtColor((img * 255).astype("uint8"), cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(gray, 50, 150)
-
-            edge_density = np.sum(edges) / (IMG_SIZE * IMG_SIZE)
-            mean_pixel = np.mean(img)
-
-            if edge_density < 2:
-                return "INVALID"
-            elif mean_pixel < 0.5:
-                return "FRAUD"
-            else:
-                return "GENUINE"
-
-        except:
-            return "ERROR"
-
     if image is not None:
         st.image(image, caption="Input Image", use_column_width=True)
 
-        result = predict_image(image)
+        # STEP 1: Check Aadhaar
+        if not is_aadhaar(image):
+            result = "NOT AADHAAR ❌"
+            st.warning("❌ Uploaded document is NOT Aadhaar")
 
-        if result == "FRAUD":
-            st.error("⚠️ Fraudulent Document Detected!")
-        elif result == "GENUINE":
-            st.success("✅ Genuine Document")
-        elif result == "INVALID":
-            st.warning("❌ Invalid Document")
         else:
-            st.error("Error processing image")
+            # STEP 2: Fraud Detection
+            result = predict_image(image)
 
-        # Save history
+            if result == "FRAUD":
+                st.error("⚠️ Fraudulent Document Detected!")
+            elif result == "GENUINE":
+                st.success("✅ Genuine Aadhaar Document")
+            elif result == "INVALID":
+                st.warning("❌ Invalid Aadhaar Image")
+            else:
+                st.error("Error processing image")
+
+        st.write("Prediction:", result)
+
+        # SAVE HISTORY
         st.session_state.history.append({
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Result": result
         })
 
 # =========================
-# PAGE 2: VIEW HISTORY
+# PAGE 2: HISTORY
 # =========================
 elif page == "View History":
 
@@ -100,7 +139,6 @@ elif page == "View History":
     else:
         st.write("No history available")
 
-    # Clear history button
     if st.button("Clear History"):
         st.session_state.history = []
         st.success("History Cleared!")
