@@ -1,74 +1,88 @@
 import streamlit as st
 import numpy as np
 import cv2
+import pandas as pd
+from tensorflow.keras.models import load_model
 from PIL import Image
+
+# Load model
+model = load_model(
+    r"D:\NMIMS\4th year\internship\Springboard\fraud_model.h5")
+
+# Load OCR CSV
+ocr_df = pd.read_csv(r"D:\NMIMS\4th year\internship\Springboard\ocr_results.csv")
 
 IMG_SIZE = 128
 
+# Title
 st.title("AI Powered Aadhaar Fraud Detection System")
 st.write("Upload an Aadhaar image to check if it is Genuine or Fraud.")
 
+# Upload file
 uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"])
 
-def predict_image(image):
-    try:
-        img = np.array(image)
+def cnn_predict(image):
+    img = np.array(image)
 
-        # Debug
-        st.write("Image Shape:", img.shape)
+    if len(img.shape) == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2EGB)
 
-        if img is None or img.size == 0:
-            return "ERROR: Invalid Image"
+    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+    img = img / 255.0
+    img = np.reshape(img, (1, IMG_SIZE, IMG_SIZE, 3))
 
-        # Convert grayscale if needed
-        if len(img.shape) == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    pred = model.predict(img)[0][0]
 
-        img = cv2.resize(img, (128,128))
-        img = img / 255.0
+    return pred
 
-        gray = cv2.cvtColor((img*255).astype("uint8"), cv2.COLOR_RGB2GRAY)
-        edges = cv2.Canny(gray, 50, 150)
+#    return "FRAUD" if pred > 0.5 else "GENUINE"
 
-        edge_density = np.sum(edges) / (128*128)
+# OCR Validation (from CSV)
 
-        # Debug
-        st.write("Edge Density:", edge_density)
+def ocr_validate(file_name):
+    row = ocr_df[ocr_df["file"] == file_name]
 
-        if edge_density < 5:
-            return "INVALID DOCUMENT ❌"
+    if row.empty:
+        return False, "No OCR data found"
+    
+    uid = row.iloc[0]["uid"]
+    dob = row.iloc[0]["dob"]
 
-        mean_pixel = np.mean(img)
+    # Basic validation
+    if str(uid) == "[]" or str(dob) == "[]":
+        return False, "Missing UID or DOB"
+    
+    return True, "Valid OCR Data"
 
-        if mean_pixel < 0.5:
-            return "FRAUD ⚠️"
-        else:
-            return "GENUINE ✅"
-
-    except Exception as e:
-        return f"ERROR: {str(e)}"
-
-
-# MAIN UI
+# When user uploads
 if uploaded_file is not None:
     try:
-        image = Image.open(uploaded_file)
 
+        image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Image", use_column_width=True)
 
-        result = predict_image(image)
+        # Save uploaded file temporarily
+        file_name = uploaded_file.name
 
-        # Show result ALWAYS
-        if "FRAUD" in result:
-            st.error("⚠️ Fraudulent Document Detected!")
-        elif "GENUINE" in result:
-            st.success("✅ Genuine Document")
-        elif "INVALID" in result:
-            st.warning("❌ Invalid Document (Not Aadhaar)")
+        #CNN result
+        cnn_score = cnn_predict(image)
+
+        #OCR validation
+        ocr_valid, ocr_msg = ocr_validate(file_name)
+
+        # Debug info
+        st.write("CNN Score:", cnn_score)
+        st.write("OCR Status:", ocr_msg)
+
+        # FINAL DECISION
+        if cnn_score > 0.5 or not ocr_valid:
+            st.error("Fraudulent Document Detected!")
+            result = "FRAUD"
         else:
-            st.error(result)
-
-        st.write("Prediction:", result)
+            st.success("Genuine Document")
+            result = "GENUINE"
+        
+        st.write("Final Prediction:", result)
 
     except Exception as e:
-        st.error(f"App Error: {str(e)}")
+        st.error(f"Error: {str(e)}")
